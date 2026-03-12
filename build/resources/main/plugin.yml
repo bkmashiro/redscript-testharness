@@ -1,6 +1,0 @@
-name: RedScriptTestHarness
-version: '1.0.0'
-main: dev.redscript.testharness.TestHarnessPlugin
-api-version: '1.21'
-description: HTTP API bridge for RedScript integration testing
-authors: [redscript-dev]
