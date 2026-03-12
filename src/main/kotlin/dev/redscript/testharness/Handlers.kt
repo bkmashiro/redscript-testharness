@@ -204,19 +204,28 @@ class ResetHandler(private val plugin: TestHarnessPlugin) : HttpHandler {
         var steps = mutableListOf("logs cleared")
 
         Bukkit.getScheduler().runTask(plugin, Runnable {
+            val x1 = (body["x1"] as? Double)?.toInt() ?: -50
+            val y1 = (body["y1"] as? Double)?.toInt() ?: 0
+            val z1 = (body["z1"] as? Double)?.toInt() ?: -50
+            val x2 = (body["x2"] as? Double)?.toInt() ?: 50
+            val y2 = (body["y2"] as? Double)?.toInt() ?: 100
+            val z2 = (body["z2"] as? Double)?.toInt() ?: 50
+            // Force-load chunks in test area (required in void worlds with no players)
+            val chunkX1 = (x1 shr 4) - 1
+            val chunkZ1 = (z1 shr 4) - 1
+            val chunkX2 = (x2 shr 4) + 1
+            val chunkZ2 = (z2 shr 4) + 1
+            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "forceload add $chunkX1 $chunkZ1 $chunkX2 $chunkZ2")
+            steps.add("chunks forceloaded ($chunkX1,$chunkZ1) to ($chunkX2,$chunkZ2)")
+
             // Clear test area if requested
             if (body["clearArea"] == true) {
-                val x1 = (body["x1"] as? Double)?.toInt() ?: -50
-                val y1 = (body["y1"] as? Double)?.toInt() ?: 0
-                val z1 = (body["z1"] as? Double)?.toInt() ?: -50
-                val x2 = (body["x2"] as? Double)?.toInt() ?: 50
-                val y2 = (body["y2"] as? Double)?.toInt() ?: 100
-                val z2 = (body["z2"] as? Double)?.toInt() ?: 50
                 Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "fill $x1 $y1 $z1 $x2 $y2 $z2 minecraft:air")
                 steps.add("area ($x1,$y1,$z1) to ($x2,$y2,$z2) cleared")
             }
 
             // Kill all non-player entities if requested
+            @Suppress("UNUSED_EXPRESSION")
             if (body["killEntities"] == true) {
                 Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "kill @e[type=!minecraft:player]")
                 steps.add("entities killed")
@@ -241,15 +250,21 @@ class ResetHandler(private val plugin: TestHarnessPlugin) : HttpHandler {
     }
 }
 
-// POST /reload -> /reload datapacks
+// POST /reload -> safely reload data packs only (NOT full plugin reload)
 class ReloadHandler(private val plugin: TestHarnessPlugin) : HttpHandler {
     override fun handle(exchange: HttpExchange) {
         val latch = CountDownLatch(1)
         Bukkit.getScheduler().runTask(plugin, Runnable {
-            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "reload confirm")
+            try {
+                // reloadData() reloads advancements, loot tables, and datapacks
+                // without restarting plugins — much safer than /reload confirm
+                Bukkit.reloadData()
+            } catch (e: Exception) {
+                plugin.logger.warning("reloadData failed: ${e.message}")
+            }
             latch.countDown()
         })
-        latch.await(10, TimeUnit.SECONDS)
+        latch.await(30, TimeUnit.SECONDS)
         plugin.respond(exchange, 200, mapOf("ok" to true))
     }
 }
