@@ -30,6 +30,8 @@ class TestHarnessPlugin : JavaPlugin() {
         httpServer.createContext("/status", StatusHandler(this))
         httpServer.createContext("/reset", ResetHandler(this))
         httpServer.createContext("/reload", ReloadHandler(this))
+        httpServer.createContext("/player", PlayerHandler(this))
+        httpServer.createContext("/nbt", NbtHandler(this))
 
         httpServer.executor = null
         httpServer.start()
@@ -38,7 +40,7 @@ class TestHarnessPlugin : JavaPlugin() {
         server.pluginManager.registerEvents(GameEventListener(this), this)
 
         logger.info("TestHarness HTTP API started on port $port")
-        logger.info("Endpoints: /scoreboard /block /entity /chat /events /command /tick /status /reset")
+        logger.info("Endpoints: /scoreboard /block /entity /chat /events /command /tick /status /reset /player /nbt")
     }
 
     override fun onDisable() {
