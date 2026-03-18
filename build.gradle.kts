@@ -3,7 +3,7 @@ plugins {
 }
 
 group = "dev.redscript"
-version = "1.0.0"
+version = "1.1.0"
 
 repositories {
     mavenCentral()
@@ -17,8 +17,13 @@ dependencies {
     compileOnly("com.google.code.gson:gson:2.10.1")
 }
 
-kotlin {
-    jvmToolchain(21)
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
+    kotlinOptions.jvmTarget = "21"
+}
+
+tasks.withType<JavaCompile> {
+    sourceCompatibility = "21"
+    targetCompatibility = "21"
 }
 
 tasks.jar {
