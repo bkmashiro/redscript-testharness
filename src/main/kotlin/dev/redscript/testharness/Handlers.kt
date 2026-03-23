@@ -250,6 +250,103 @@ class ResetHandler(private val plugin: TestHarnessPlugin) : HttpHandler {
     }
 }
 
+// GET /scoreboard/dump?obj=<objective>  -> { "obj": "__stdlib_queue8_test", "entries": { "$p0": 0, ... } }
+// GET /scoreboard/dump?ns=<namespace>   -> same as obj=__<namespace>
+class ScoreboardDumpHandler(private val plugin: TestHarnessPlugin) : HttpHandler {
+    override fun handle(exchange: HttpExchange) {
+        if (exchange.requestMethod != "GET") { plugin.respond(exchange, 405, mapOf("error" to "Method not allowed")); return }
+        val params = plugin.parseQuery(exchange.requestURI.query)
+
+        val objName = when {
+            params.containsKey("obj") -> params["obj"]!!
+            params.containsKey("ns")  -> "__${params["ns"]!!}"
+            else -> { plugin.respond(exchange, 400, mapOf("error" to "obj or ns required")); return }
+        }
+
+        val scoreboard = Bukkit.getScoreboardManager().mainScoreboard
+        val objective = scoreboard.getObjective(objName) ?: run {
+            plugin.respond(exchange, 404, mapOf("error" to "Objective '$objName' not found")); return
+        }
+
+        val entries = mutableMapOf<String, Int>()
+        for (entry in scoreboard.entries) {
+            val score = objective.getScore(entry)
+            if (score.isScoreSet) {
+                entries[entry] = score.score
+            }
+        }
+
+        plugin.respond(exchange, 200, mapOf("obj" to objName, "entries" to entries))
+    }
+}
+
+// GET /storage/dump?storage=rs:macro_args -> { "storage": "rs:macro_args", "raw": "{ val: 11 }", "ok": true }
+class StorageDumpHandler(private val plugin: TestHarnessPlugin) : HttpHandler {
+
+    private val logFile = java.io.File(plugin.dataFolder.parentFile.parentFile, "logs/latest.log")
+
+    override fun handle(exchange: HttpExchange) {
+        if (exchange.requestMethod != "GET") { plugin.respond(exchange, 405, mapOf("error" to "Method not allowed")); return }
+        val params = plugin.parseQuery(exchange.requestURI.query)
+        val storage = params["storage"] ?: run {
+            plugin.respond(exchange, 400, mapOf("error" to "storage required")); return
+        }
+
+        val latch = CountDownLatch(1)
+        var rawOutput = ""
+
+        Bukkit.getScheduler().runTask(plugin, Runnable {
+            val logSizeBefore = if (logFile.exists()) logFile.length() else 0L
+
+            // "data get storage <storage>" without a path returns the whole compound
+            Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "data get storage $storage")
+
+            Bukkit.getScheduler().runTaskLater(plugin, Runnable {
+                rawOutput = readNewLogLines(logSizeBefore)
+                latch.countDown()
+            }, 2L)
+        })
+
+        latch.await(5, TimeUnit.SECONDS)
+
+        val ok = rawOutput.isNotBlank()
+        plugin.respond(exchange, 200, mapOf(
+            "storage" to storage,
+            "raw"     to rawOutput,
+            "ok"      to ok
+        ))
+    }
+
+    private fun readNewLogLines(offsetBytes: Long): String {
+        if (!logFile.exists()) return ""
+        return try {
+            val allBytes = logFile.readBytes()
+            if (allBytes.size <= offsetBytes) return ""
+            val newContent = String(allBytes, offsetBytes.toInt(), (allBytes.size - offsetBytes).toInt(), Charsets.UTF_8)
+            newContent.lines()
+                .filter { line ->
+                    line.contains("has the following NBT") ||
+                    line.contains("has the following contents") ||
+                    line.contains("no elements matching") ||
+                    line.contains("Found no elements")
+                }
+                .map { stripLogPrefix(it) }
+                .lastOrNull() ?: ""
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    private fun stripLogPrefix(line: String): String {
+        val prefixRegex = Regex("""^\[[\d:]+\] \[[^\]]+\]: """)
+        val stripped = prefixRegex.replace(line, "").trim()
+        // Extract just the NBT compound/value after ": "
+        val nbtRegex = Regex("""(?:has the following NBT|has the following contents): (.+)$""")
+        val match = nbtRegex.find(stripped)
+        return match?.groupValues?.get(1)?.trim() ?: stripped
+    }
+}
+
 // POST /reload -> safely reload data packs only (NOT full plugin reload)
 class ReloadHandler(private val plugin: TestHarnessPlugin) : HttpHandler {
     override fun handle(exchange: HttpExchange) {
